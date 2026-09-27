@@ -163,9 +163,15 @@ Last op:  up  2026-09-27 14:02  ok
 - **podman の互換 API**: 互換 API で、restart policy・メモリ上限・`/info` による rootless 判定が期待どおりに動くか確認する。
 - **ホストの再起動後**: rootless podman の場合、mcctl ユーザーの linger を有効にしておかないとデーモンが起動しない。セットアップ手順に書く。
 
-## リポジトリ構成（予定）
-- `cmd/mcctl`: CLI（今の `cmd/client` を改名する）
-- `cmd/mcctld`: デーモン
-- `api/openapi.yaml`: API 仕様
-- `internal/store`: Store（JSON ファイルの実装）
-- `internal/engine`: Engine インターフェースと Docker API の実装
+## リポジトリ構成
+| パス | 役割 |
+| --- | --- |
+| `cmd/mcctl` | CLI（cobra）。生成したクライアントで API を叩くだけ |
+| `cmd/mcctld` | デーモンのエントリポイント。フラグの解釈と各パッケージの組み立て |
+| `api/openapi.yaml` | API 仕様（正） |
+| `internal/api` | oapi-codegen の生成コード（サーバー I/F とクライアント） |
+| `internal/daemon` | 中核のロジック（操作、ロック、最後の操作、起動時同期） |
+| `internal/store` | Store（JSON ファイルの実装） |
+| `internal/engine` | Engine インターフェース、Docker API の実装、フェイク |
+
+依存の向き: `cmd/mcctld` → `internal/api`（ハンドラ）→ `internal/daemon` → `internal/store`, `internal/engine`
