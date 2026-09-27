@@ -1,6 +1,6 @@
-// Package engine はコンテナエンジンの操作を担う。
+// Package engine はコンテナの操作を担う。
 //
-// デーモンは Engine インターフェースだけに依存する。実装は Docker Engine API を
-// 使うもの（docker と、podman の Docker 互換ソケットの両方に対応する）と、
-// ユニットテスト用のフェイクを用意する。
+// ライフサイクルは quadlet の .container ファイルと systemd --user（D-Bus）で扱い、
+// pull / inspect / logs / exec は podman の Docker 互換 API で扱う。
+// デーモンはこのパッケージのインターフェースだけに依存し、ユニットテストではフェイクを使う。
 package engine
