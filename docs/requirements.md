@@ -12,7 +12,7 @@ k8s を使うほどではないが、手でコンテナを管理するのは面�
 ```
                                         ┌─ 書き込み ──▶ ~/.config/containers/systemd/mcctl-<name>.container
 mcctl ──HTTP over Unix socket──▶ mcctld ┼─ D-Bus ────▶ systemd --user ──(quadlet)──▶ podman ──▶ itzg/minecraft-server
-                                   │    └─ 互換 API ─▶ podman.sock（pull / inspect / logs / exec）
+                                   │    └─ 互換 API ─▶ podman.sock（pull / inspect / exec）
                                    └──▶ Store (state.json)
 ```
 
@@ -24,7 +24,7 @@ mcctl ──HTTP over Unix socket──▶ mcctld ┼─ D-Bus ────▶ s
 | コンテナイメージ | `itzg/minecraft-server`。自前ビルドはしない |
 | コンテナエンジン | **rootless podman 専用**（docker と rootful podman には対応しない） |
 | ライフサイクル | **quadlet ＋ systemd --user**。mcctld は `.container` ファイルを生成し、systemd を D-Bus（go-systemd）で操作する |
-| 参照系 | podman の Docker 互換 API（pull / inspect / logs / exec） |
+| 参照系 | podman の Docker 互換 API（pull / inspect / exec）。ログは journal（`journalctl --user`） |
 | 操作モデル | 命令型 CLI。サーバーは名前で識別 |
 | 正の所在 | **Store が正**。`.container` ファイルは Store から生成する生成物 |
 | Store の役割 | **求める状態のみ**保持する。実際の状態は常に systemd と podman に問い合わせる |
@@ -120,7 +120,7 @@ WantedBy=default.target
 - `UID=0` / `GID=0`: rootless ではコンテナ内の root がホストの mcctl ユーザーに対応する。データディレクトリの中身は mcctl の持ち物になり、ホストからは `sudo -u mcctl` で編集できる（#2 で確認済み）。
 - `:Z`: SELinux 環境では、これがないと `/data` に書き込めない（#2）。
 - `[Install]` の有無で、ホストの再起動後に自動で起動するかどうかが desiredState と一致する。
-- `LogDriver=journald`: quadlet のコンテナは `--rm` で動くため、再起動や停止のたびにコンテナのログが消える。journald に流すことで、クラッシュ前のログや systemd の起動失敗のメッセージも後から読めるようにする（**要検証**）。
+- `LogDriver=journald`: quadlet のコンテナは `--rm` で動くため、再起動や停止のたびにコンテナのログが消える。journald に流すことで、クラッシュ前のログ、systemd の終了理由と再起動の記録、新しいコンテナの起動ログが、1本の journal に時系列で残る（#2 で確認済み）。
 - 各値（タイムアウト、バックオフ）は初期値。運用しながら調整する。
 
 ## 操作の流れ
@@ -152,6 +152,11 @@ systemd の unit の状態を読み替える。あわせて health（互換 API 
 - サーバーごとに「最後の操作（種類、開始時刻と終了時刻、結果、エラー）」をデーモンのメモリに持ち、`status` に表示する。
 - 永続化はしない（Store には求める状態だけを保存するため）。
 - unit が `failed` になった理由は journal で確認する（`mcctl logs`）。
+
+### ログ
+- mcctld は `journalctl --user -u mcctl-<name>.service -o json [-n N] [-f]` を実行して読み、必要な項目だけ返す。sdjournal（cgo と libsystemd が必要）は使わない。
+- mcctl はシステムユーザー（UID < 1000）なので、journald は専用の journal を作らず `system.journal` に入れる。そのため **mcctl を `systemd-journal` グループに入れる**（#2 で確認済み）。代わりに mcctl はシステム全体のログを読めるようになるが、mcctld は自分の unit のログだけを返す。
+- journal が揮発性（`/var/log/journal` がない）だと、ホストの再起動でログが消える。永続化を推奨する（AlmaLinux 10 の既定は揮発性だった）。
 
 ### 起動時同期
 ホストの再起動後の自動起動とクラッシュからの復旧は systemd が担うので、起動時同期は最小限にする。
@@ -227,17 +232,18 @@ Last op:   up  2026-09-27 14:02  ok
 - 実際の podman と systemd を使うテストは `//go:build integration` を付け、Linux の VM で手動で実行する。
 
 ## 実装時に確認するリスク
-- **journald のログ**: `LogDriver=journald` で、コンテナが消えた後もログを journal から読めるか、互換 API の logs がこの設定でも動くかを確認する。journal の読み方（`journalctl --user` を実行するか、ライブラリを使うか）も決める。
 - **メモリ上限**: quadlet の専用キーがあればそれを使い、なければ `PodmanArgs=--memory` を使う。
 - **起動の初回**: サーバー本体のダウンロードとワールドの生成を含めて `TimeoutStartSec=900` に収まるか。Mod を多く入れたサーバーでは足りない可能性がある。
 
 ## セットアップ（概要。詳細は #11）
 1. `useradd --system --create-home --home-dir /var/lib/mcctl mcctl` と、subuid / subgid の付与
-2. `loginctl enable-linger mcctl`
-3. `systemctl --user -M mcctl@ enable --now podman.socket`
-4. tmpfiles.d で `/run/mcctl` を作る
-5. `systemctl --user -M mcctl@ enable --now mcctld`
-6. 操作するユーザーを `mcctl` グループに入れる
+2. `usermod -aG systemd-journal mcctl`（ユーザー systemd が起動する前に行う。後から行う場合は `user@<uid>.service` を再起動する）
+3. `loginctl enable-linger mcctl`
+4. （推奨）`mkdir -p /var/log/journal` で journal を永続化する
+5. `systemctl --user -M mcctl@ enable --now podman.socket`
+6. tmpfiles.d で `/run/mcctl` を作る
+7. `systemctl --user -M mcctl@ enable --now mcctld`
+8. 操作するユーザーを `mcctl` グループに入れる
 
 ## リポジトリ構成
 | パス | 役割 |
