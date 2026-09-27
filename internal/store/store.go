@@ -8,24 +8,24 @@ import (
 
 type MinecraftContainer struct {
 	// マイクラのバージョン
-	version string
+	Version string
 	//コンテナのイメージタグ
-	imageTag string
+	ImageTag string
 	// 起動した時の時間
-	startedAt time.Time
+	StartedAt time.Time
 	//　ポート番号
-	port uint
+	Port uint
 }
 
 var (
-	ErrNotFound      = errors.New("Failed to read")
-	ErrUnexpected    = errors.New("Unexpected error")
-	ErrCouldNotWrite = errors.New("Failed to write")
+	ErrNotFound      = errors.New("failed to read")
+	ErrUnexpected    = errors.New("unexpected error")
+	ErrCouldNotWrite = errors.New("failed to write")
 )
 
 type ContainerInfo struct {
 	// マイクラのコンテナ
-	mcContainers []MinecraftContainer
+	MCContainers []MinecraftContainer
 }
 
 // コンテナがどのような状態かを保存したり読んだりするインターフェース
