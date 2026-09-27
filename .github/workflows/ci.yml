@@ -29,6 +29,11 @@ jobs:
       - name: go mod tidy
         if: matrix.goos == 'linux'
         run: go mod tidy -diff
+      - name: go generate
+        if: matrix.goos == 'linux'
+        run: |
+          go generate ./...
+          git diff --exit-code || { echo "::error::生成コードが古い。go generate ./... を実行してコミットすること"; exit 1; }
       - name: go build
         env:
           GOOS: ${{ matrix.goos }}
