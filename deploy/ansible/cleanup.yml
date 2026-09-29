@@ -96,6 +96,18 @@
       ansible.builtin.meta: end_host
       when: not (mcctl_uninstall | bool)
 
+    - name: サービス用ユーザーがいるか調べる
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ mcctl_user }}"
+      register: mcctl_uninstall_passwd
+      failed_when: false
+
+    - name: ユーザーがいなければ終わる
+      # uninstall.sh はユーザーがいないとエラーで終わる。2回目の実行を changed=0 で終えるため
+      ansible.builtin.meta: end_host
+      when: mcctl_user not in (mcctl_uninstall_passwd.ansible_facts.getent_passwd | default({}))
+
     - name: 確認のためのユーザー名が一致するか確かめる
       ansible.builtin.assert:
         that: mcctl_uninstall_confirm == mcctl_user
