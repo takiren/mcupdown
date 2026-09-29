@@ -1,0 +1,11 @@
+---
+# ansible-lint -c deploy/ansible/.ansible-lint deploy/ansible
+profile: production
+skip_list:
+  # タスク名は日本語で書く。「mcctld を…」のように小文字の英単語で始まることがある
+  - name[casing]
+  # strategy: free は使わない。ビルドは手元で一度だけ行う
+  - run-once[task]
+exclude_paths:
+  - .build/
+  - inventory.yml

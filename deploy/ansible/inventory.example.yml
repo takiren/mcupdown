@@ -1,0 +1,13 @@
+# このファイルを inventory.yml にコピーして、接続先を書く。inventory.yml は .gitignore で除外している。
+#
+#   cp inventory.example.yml inventory.yml
+#
+# 接続するユーザーには、パスワードなしで root になれる sudo が必要。
+mcctl_hosts:
+  hosts:
+    testvm:
+      ansible_host: 192.0.2.10 # 例（RFC 5737 の文書用アドレス）
+      ansible_user: admin
+  vars:
+    # 操作する人のアカウントを mcctl グループに入れる場合
+    # mcctl_operators: [admin]

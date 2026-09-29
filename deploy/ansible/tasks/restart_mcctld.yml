@@ -1,0 +1,26 @@
+---
+# バイナリを入れ替えたあとに mcctld を再起動する（deploy.yml の handler から呼ぶ）。
+# まっさらなマシンではユーザーもユニットもまだないので、そのときは何もしない。
+- name: サービス用ユーザーがいるか調べる
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ mcctl_user }}"
+  register: mcctl_restart_passwd
+  failed_when: false
+
+- name: mcctld を再起動する
+  when: mcctl_user in (mcctl_restart_passwd.ansible_facts.getent_passwd | default({}))
+  block:
+    - name: サービス用ユーザーを調べる
+      ansible.builtin.include_tasks: user_facts.yml
+
+    - name: mcctld のユニットがあるか調べる
+      ansible.builtin.stat:
+        path: "{{ mcctl_home }}/.config/systemd/user/mcctld.service"
+      register: mcctl_unit_stat
+
+    - name: mcctld を再起動する（動いているときだけ）
+      ansible.builtin.command:
+        argv: "{{ mcctl_runas + ['systemctl', '--user', 'try-restart', 'mcctld.service'] }}"
+      when: mcctl_unit_stat.stat.exists
+      changed_when: true

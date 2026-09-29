@@ -1,0 +1,14 @@
+---
+# 検証用マシンを一通り準備する。
+# バイナリを先に配置するのは、setup.sh が mcctld のユニットを有効にしたときに起動できるようにするため。
+- name: ベースの準備
+  ansible.builtin.import_playbook: base.yml
+
+- name: バイナリのビルドと配置
+  ansible.builtin.import_playbook: deploy.yml
+
+- name: mcctl のセットアップ
+  ansible.builtin.import_playbook: setup.yml
+
+- name: イメージの事前 pull
+  ansible.builtin.import_playbook: images.yml

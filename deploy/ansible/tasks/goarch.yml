@@ -1,0 +1,15 @@
+---
+# 対象マシンのアーキテクチャを GOARCH に読み替える。
+- name: GOARCH を決める
+  vars:
+    mcctl_goarch_map:
+      x86_64: amd64
+      aarch64: arm64
+  ansible.builtin.set_fact:
+    mcctl_goarch: "{{ mcctl_goarch_map[ansible_facts['architecture']] | default('') }}"
+
+- name: 対応しているアーキテクチャか確認する
+  ansible.builtin.assert:
+    that: mcctl_goarch | length > 0
+    fail_msg: "未対応のアーキテクチャ: {{ ansible_facts['architecture'] }}"
+    quiet: true

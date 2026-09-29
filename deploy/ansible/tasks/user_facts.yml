@@ -1,0 +1,33 @@
+---
+# サービス用ユーザーの uid とホームを調べ、そのユーザーとしてコマンドを実行するための前置き（mcctl_runas）を作る。
+# `sudo -u` はパスワードを求められることがあり、`systemctl --user -M user@` は logind のセッションが残る
+# （docs/troubleshooting.md）ので、root から runuser で実行する。
+- name: サービス用ユーザーを調べる
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ mcctl_user }}"
+  register: mcctl_user_passwd
+  failed_when: false
+
+- name: サービス用ユーザーがいることを確認する
+  ansible.builtin.assert:
+    that: mcctl_user in (mcctl_user_passwd.ansible_facts.getent_passwd | default({}))
+    fail_msg: "ユーザー {{ mcctl_user }} がいない。先に setup.yml（または site.yml）を実行すること"
+    quiet: true
+
+- name: 実行用の前置きを作る
+  vars:
+    mcctl_pw: "{{ mcctl_user_passwd.ansible_facts.getent_passwd[mcctl_user] }}"
+  ansible.builtin.set_fact:
+    mcctl_uid: "{{ mcctl_pw[1] }}"
+    mcctl_home: "{{ mcctl_pw[4] }}"
+    mcctl_runas:
+      - runuser
+      - -u
+      - "{{ mcctl_user }}"
+      - --
+      - env
+      - "HOME={{ mcctl_pw[4] }}"
+      - "XDG_RUNTIME_DIR=/run/user/{{ mcctl_pw[1] }}"
+      - "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{{ mcctl_pw[1] }}/bus"
+      - "PATH=/usr/local/bin:/usr/bin:/bin"

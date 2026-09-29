@@ -1,0 +1,129 @@
+---
+# 統合テスト（//go:build integration）を対象マシンで実行する。
+# 手元でテストバイナリを作って転送し、サービス用ユーザーとして実行する。パッケージは mcctl_it_packages で選ぶ。
+- name: 統合テスト
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: GOARCH を決める
+      ansible.builtin.import_tasks: tasks/goarch.yml
+
+    - name: サービス用ユーザーを調べる
+      ansible.builtin.import_tasks: tasks/user_facts.yml
+
+    - name: テストの一覧を作る
+      ansible.builtin.set_fact:
+        # ./internal/engine → internal_engine
+        mcctl_it_tests: >-
+          {{ mcctl_it_packages | map('regex_replace', '^\./', '')
+          | map('regex_replace', '/+$', '') | map('regex_replace', '/', '_') | zip(mcctl_it_packages) | list }}
+
+    - name: 手元の作業ディレクトリを作る
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: mcctl-it-
+      register: mcctl_it_local
+
+    - name: テストバイナリを作る
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ansible.builtin.command:
+        cmd: >-
+          go test -c -tags integration
+          -o {{ mcctl_it_local.path }}/{{ item[0] }}.test
+          {{ item[1] }}
+        chdir: "{{ mcctl_it_repo_dir }}"
+      environment:
+        GOOS: linux
+        GOARCH: "{{ mcctl_goarch }}"
+        CGO_ENABLED: "0"
+      loop: "{{ mcctl_it_tests }}"
+      loop_control:
+        label: "{{ item[1] }}"
+      changed_when: false
+
+    - name: テストを実行する
+      block:
+        - name: 転送先のディレクトリを作る
+          ansible.builtin.file:
+            path: "{{ mcctl_it_remote_dir }}/{{ item[0] }}"
+            state: directory
+            owner: "{{ mcctl_user }}"
+            group: "{{ mcctl_user }}"
+            mode: "0755"
+          loop: "{{ mcctl_it_tests }}"
+          loop_control:
+            label: "{{ item[1] }}"
+
+        - name: テストバイナリを転送する
+          ansible.builtin.copy:
+            src: "{{ mcctl_it_local.path }}/{{ item[0] }}.test"
+            dest: "{{ mcctl_it_remote_dir }}/{{ item[0] }}/{{ item[0] }}.test"
+            owner: "{{ mcctl_user }}"
+            group: "{{ mcctl_user }}"
+            mode: "0755"
+          loop: "{{ mcctl_it_tests }}"
+          loop_control:
+            label: "{{ item[1] }}"
+
+        - name: testdata を転送する
+          ansible.builtin.copy:
+            src: "{{ mcctl_it_repo_dir }}/{{ item[1] }}/testdata"
+            dest: "{{ mcctl_it_remote_dir }}/{{ item[0] }}/"
+            owner: "{{ mcctl_user }}"
+            group: "{{ mcctl_user }}"
+            mode: "u=rwX,go=rX"
+          loop: "{{ mcctl_it_tests }}"
+          loop_control:
+            label: "{{ item[1] }}"
+          when: (mcctl_it_repo_dir ~ '/' ~ item[1] ~ '/testdata') is directory
+
+        - name: テストを実行する
+          ansible.builtin.command:
+            # go test と同じく、パッケージのディレクトリをカレントにして実行する
+            argv: >-
+              {{ mcctl_runas + ['./' ~ item[0] ~ '.test', '-test.v', '-test.timeout=' ~ mcctl_it_timeout]
+              + (['-test.run=' ~ mcctl_it_run] if mcctl_it_run | length > 0 else []) }}
+            chdir: "{{ mcctl_it_remote_dir }}/{{ item[0] }}"
+          loop: "{{ mcctl_it_tests }}"
+          loop_control:
+            label: "{{ item[1] }}"
+          register: mcctl_it_results
+          # 長いテストで SSH が切れないように非同期で待つ
+          async: 3600
+          poll: 15
+          failed_when: false
+          changed_when: false
+
+        - name: テストの出力を表示する
+          ansible.builtin.debug:
+            msg: "{{ item.stdout_lines + item.stderr_lines }}"
+          loop: "{{ mcctl_it_results.results }}"
+          loop_control:
+            label: "{{ item.item[1] }} (rc={{ item.rc }})"
+
+        - name: 結果を確認する
+          ansible.builtin.assert:
+            that: mcctl_it_results.results | rejectattr('rc', 'equalto', 0) | list | length == 0
+            fail_msg: >-
+              失敗したパッケージ:
+              {{ mcctl_it_results.results | rejectattr('rc', 'equalto', 0) | map(attribute='item') | map('last') | list }}
+            success_msg: すべて成功した
+
+      always:
+        - name: 転送したテストを消す
+          ansible.builtin.file:
+            path: "{{ mcctl_it_remote_dir }}"
+            state: absent
+
+        - name: 手元の作業ディレクトリを消す
+          delegate_to: localhost
+          become: false
+          run_once: true
+          ansible.builtin.file:
+            path: "{{ mcctl_it_local.path }}"
+            state: absent
