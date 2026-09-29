@@ -1,0 +1,419 @@
+openapi: 3.0.3
+info:
+  title: mcctld API
+  version: 0.1.0
+  description: |
+    mcctld が Unix ソケット（既定: /run/mcctl/mcctld.sock）で公開する HTTP API。
+    mcctl はこの API を叩くだけのクライアント。要件は docs/requirements.md を参照。
+
+    - 参照系（GET）は誰でも呼べる。変更系は mcctl グループのメンバーだけが呼べる（それ以外は 403）。
+    - up / down は非同期。202 で受け付け、進み具合は GET /v1/servers/{name} で確認する。
+servers:
+  - url: http://mcctld/v1
+
+paths:
+  /servers:
+    get:
+      operationId: listServers
+      summary: サーバーの一覧
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createServer
+      summary: サーバーを登録し、データディレクトリを作る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServerRequest"
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 同じ名前のサーバーがある（already_exists）、またはポートが重複している（port_in_use）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /servers/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    get:
+      operationId: getServer
+      summary: サーバーの詳細（status）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteServer
+      summary: サーバーを削除する（rm）
+      parameters:
+        - name: purge
+          in: query
+          description: データディレクトリと drop-in も削除する
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "204":
+          description: 削除した
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 動いている（server_running）、または操作中（operation_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /servers/{name}/up:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    post:
+      operationId: upServer
+      summary: サーバーを起動する（非同期）
+      parameters:
+        - name: pull
+          in: query
+          description: イメージが手元にあっても pull する
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "202":
+          description: 受け付けた。レスポンスは受け付けた時点の状態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 操作中（operation_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /servers/{name}/down:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    post:
+      operationId: downServer
+      summary: サーバーを停止する（非同期）
+      parameters:
+        - name: force
+          in: query
+          description: 起動処理の途中でも停止する（最大 60 秒後に SIGKILL される）
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "202":
+          description: 受け付けた。レスポンスは受け付けた時点の状態
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Server"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 起動処理の途中（server_starting）、または操作中（operation_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /servers/{name}/logs:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    get:
+      operationId: getServerLogs
+      summary: サーバーのログ（journal）を読む
+      description: |
+        停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。
+      parameters:
+        - name: tail
+          in: query
+          description: 末尾から何件返すか
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 200
+      responses:
+        "200":
+          description: OK。古い順に並ぶ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogList"
+        "404":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  parameters:
+    Name:
+      name: name
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/ServerName"
+
+  responses:
+    Error:
+      description: エラー
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    ServerName:
+      type: string
+      pattern: "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$"
+      example: survival
+
+    Memory:
+      type: string
+      description: JVM のヒープ。コンテナのメモリ上限はここから自動で計算する
+      pattern: "^[1-9][0-9]*[MG]$"
+      example: 2G
+
+    ServerSpec:
+      description: サーバーの定義。Store に保存される
+      type: object
+      required: [name, port, version, type, memory, imageTag, env]
+      properties:
+        name:
+          $ref: "#/components/schemas/ServerName"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 25565
+        version:
+          type: string
+          description: itzg の VERSION
+          example: 1.21.4
+        type:
+          type: string
+          description: itzg の TYPE。値の検証はイメージに任せる
+          example: PAPER
+        memory:
+          $ref: "#/components/schemas/Memory"
+        imageTag:
+          type: string
+          description: itzg/minecraft-server のタグ。Java のバージョン選択に使う
+          example: java21
+        env:
+          type: object
+          description: itzg に渡す任意の環境変数。専用のフィールドと重なった場合は専用のフィールドが優先される
+          additionalProperties:
+            type: string
+
+    CreateServerRequest:
+      type: object
+      required: [name, port, acceptEula]
+      properties:
+        name:
+          $ref: "#/components/schemas/ServerName"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        acceptEula:
+          type: boolean
+          description: Minecraft の EULA に同意する。true でなければ 400
+        version:
+          type: string
+          default: LATEST
+        type:
+          type: string
+          default: VANILLA
+        memory:
+          $ref: "#/components/schemas/Memory"
+        imageTag:
+          type: string
+          default: latest
+        env:
+          type: object
+          additionalProperties:
+            type: string
+
+    DesiredState:
+      type: string
+      enum: [running, stopped]
+
+    ActualState:
+      type: string
+      description: |
+        systemd の unit の状態を読み替えたもの。
+        inactive → stopped、activating/start → starting、active/running → running、
+        deactivating → stopping、activating/auto-restart → restarting、failed → failed。
+        unit の状態を取得できなかった場合は unknown。
+      enum: [stopped, starting, running, stopping, restarting, failed, unknown]
+
+    Health:
+      type: string
+      description: コンテナの healthcheck の結果。コンテナがない場合は none
+      enum: [none, starting, healthy, unhealthy]
+
+    Status:
+      type: object
+      required: [state, health, restarts]
+      properties:
+        state:
+          $ref: "#/components/schemas/ActualState"
+        health:
+          $ref: "#/components/schemas/Health"
+        restarts:
+          type: integer
+          description: systemd の NRestarts
+          minimum: 0
+
+    Operation:
+      description: デーモンがメモリに持つ最後の操作。デーモンを再起動すると消える
+      type: object
+      required: [kind, result, startedAt]
+      properties:
+        kind:
+          type: string
+          enum: [up, down]
+        result:
+          type: string
+          enum: [in_progress, succeeded, failed]
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        error:
+          type: string
+          description: result が failed のときの理由
+
+    Server:
+      type: object
+      required: [spec, desiredState, status]
+      properties:
+        spec:
+          $ref: "#/components/schemas/ServerSpec"
+        desiredState:
+          $ref: "#/components/schemas/DesiredState"
+        status:
+          $ref: "#/components/schemas/Status"
+        lastOperation:
+          $ref: "#/components/schemas/Operation"
+
+    ServerList:
+      type: object
+      required: [servers]
+      properties:
+        servers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Server"
+
+    LogList:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+
+    LogEntry:
+      type: object
+      required: [time, source, message]
+      properties:
+        time:
+          type: string
+          format: date-time
+        source:
+          type: string
+          description: container はマイクラ（コンテナ）の出力、systemd は unit の起動・停止・再起動の記録
+          enum: [container, systemd]
+        message:
+          type: string
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+
+    ErrorCode:
+      type: string
+      description: |
+        invalid_argument: 入力の検証エラー（400）
+        forbidden: mcctl グループのメンバーではない（403）
+        not_found: サーバーがない（404）
+        already_exists: 同じ名前のサーバーがある（409）
+        port_in_use: 他のサーバーとポートが重複している（409）
+        operation_in_progress: 同じサーバーへの操作を実行中（409）
+        server_running: 動いているサーバーは削除できない（409）
+        server_starting: 起動処理の途中。force で強行できる（409）
+        internal: その他（500）
+      enum:
+        - invalid_argument
+        - forbidden
+        - not_found
+        - already_exists
+        - port_in_use
+        - operation_in_progress
+        - server_running
+        - server_starting
+        - internal

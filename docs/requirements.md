@@ -154,7 +154,7 @@ systemd の unit の状態を読み替える。あわせて health（互換 API 
 - unit が `failed` になった理由は journal で確認する（`mcctl logs`）。
 
 ### ログ
-- mcctld は `journalctl --user -u mcctl-<name>.service -o json [-n N] [-f]` を実行して読み、必要な項目だけ返す。sdjournal（cgo と libsystemd が必要）は使わない。
+- mcctld は `journalctl --user -u mcctl-<name>.service -o json -n N` を実行して読み、必要な項目だけ返す。sdjournal（cgo と libsystemd が必要）は使わない。
 - mcctl はシステムユーザー（UID < 1000）なので、journald は専用の journal を作らず `system.journal` に入れる。そのため **mcctl を `systemd-journal` グループに入れる**（#2 で確認済み）。代わりに mcctl はシステム全体のログを読めるようになるが、mcctld は自分の unit のログだけを返す。
 - journal が揮発性（`/var/log/journal` がない）だと、ホストの再起動でログが消える。永続化を推奨する（AlmaLinux 10 の既定は揮発性だった）。
 
@@ -178,7 +178,7 @@ systemd の unit の状態を読み替える。あわせて health（互換 API 
 | `mcctl rm <name> [--purge]` | Store から削除する。`--purge` でデータと drop-in も削除する | 同期 |
 | `mcctl list [-o json]` | 一覧を表示する | 同期 |
 | `mcctl status <name> [-o json]` | 詳細（求める状態、実際の状態、health、再起動回数、最後の操作）を表示する | 同期 |
-| `mcctl logs <name> [-f] [--tail N]` | サーバーのログ（journal）を表示する。停止中でも過去のログを読める | ストリーム |
+| `mcctl logs <name> [--tail N]` | サーバーのログ（journal）の末尾を表示する（既定 200 件）。停止中でも過去のログを読める | 同期 |
 
 全コマンド共通: `--socket` でソケットのパスを指定できる。環境変数 `MCCTL_SOCKET` でも可。
 
@@ -203,6 +203,7 @@ Last op:   up  2026-09-27 14:02  ok
 - `set`: 設定の変更。Store だけを書き換え、次の up で反映する。status には「未反映の変更あり」と表示する。
 - `exec`: rcon-cli でマイクラのコマンドを実行する。
 - `restart`: down してから up する。
+- `logs -f`: 新しいログを流し続ける。当面は `sudo journalctl -f _SYSTEMD_USER_UNIT=mcctl-<name>.service` で代用する。
 - `mcup` / `mcdown` という別名（遊び）。
 
 ### スコープ外
@@ -221,7 +222,7 @@ Last op:   up  2026-09-27 14:02  ok
 | DELETE | `/v1/servers/{name}?purge=bool` | rm | 204 |
 | POST | `/v1/servers/{name}/up?pull=bool` | up | 202 |
 | POST | `/v1/servers/{name}/down?force=bool` | down | 202 |
-| GET | `/v1/servers/{name}/logs?follow=bool&tail=N` | logs | 200（ストリーム） |
+| GET | `/v1/servers/{name}/logs?tail=N` | logs | 200 |
 
 エラー形式: `{"error": {"code": "conflict", "message": "..."}}`
 主なステータス: 400（検証エラー）、403（認可）、404、409（操作中、ポートの重複、実行中のサーバーを rm しようとした、起動処理の途中で down しようとした）
