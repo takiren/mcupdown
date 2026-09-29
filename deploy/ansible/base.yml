@@ -1,0 +1,30 @@
+---
+# マシンそのものの準備（OS の確認とパッケージ）。
+- name: ベースの準備
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: 対象の OS か確認する
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'AlmaLinux'
+          - ansible_facts['distribution_major_version'] == '10'
+        fail_msg: >-
+          AlmaLinux 10 以外（{{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}）。
+          続けるなら -e mcctl_allow_unsupported_os=true を付ける
+        quiet: true
+      when: not (mcctl_allow_unsupported_os | bool)
+
+    - name: パッケージを入れる
+      ansible.builtin.dnf:
+        name:
+          - podman
+          - curl
+        state: present
+
+    - name: SELinux の状態を表示する
+      ansible.builtin.debug:
+        msg: >-
+          SELinux: {{ ansible_facts['selinux']['status'] | default('不明') }}
+          / {{ ansible_facts['selinux']['mode'] | default('-') }}
+          （Enforcing のままでよい。mcctl はバインドマウントに :Z を付ける）
