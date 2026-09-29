@@ -1,0 +1,34 @@
+# このファイルは mcctld が生成する。編集しないこと。調整は mcctl-creative.container.d/*.conf で行う。
+[Unit]
+Description=mcctl server creative
+
+[Container]
+ContainerName=mcctl-creative
+Image=docker.io/itzg/minecraft-server:latest
+Pull=never
+Environment=EULA=TRUE
+Environment=VERSION=LATEST
+Environment=TYPE=VANILLA
+Environment=MEMORY=1536M
+Environment=UID=0
+Environment=GID=0
+Label=mcctl.managed=true
+Label=mcctl.server=creative
+Volume=/var/lib/mcctl/servers/creative:/data:Z
+PublishPort=25566:25565/tcp
+HealthCmd=mc-health
+HealthInterval=30s
+HealthStartPeriod=120s
+HealthRetries=2
+Notify=healthy
+StopTimeout=60
+LogDriver=journald
+Memory=2432m
+
+[Service]
+Restart=on-failure
+RestartSec=5
+RestartSteps=5
+RestartMaxDelaySec=5min
+TimeoutStartSec=900
+TimeoutStopSec=90
