@@ -170,27 +170,23 @@ paths:
       operationId: getServerLogs
       summary: サーバーのログ（journal）を読む
       description: |
-        LogEntry を 1 行に 1 件ずつ流す（NDJSON）。停止中のサーバーでも過去のログを読める。
-        follow=true のときは、クライアントが切断するまで新しいログを流し続ける。
+        停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。
       parameters:
-        - name: follow
-          in: query
-          schema:
-            type: boolean
-            default: false
         - name: tail
           in: query
-          description: 末尾から何件返すか。省略時はすべて
+          description: 末尾から何件返すか
           schema:
             type: integer
-            minimum: 0
+            minimum: 1
+            maximum: 10000
+            default: 200
       responses:
         "200":
-          description: OK
+          description: OK。古い順に並ぶ
           content:
-            application/x-ndjson:
+            application/json:
               schema:
-                $ref: "#/components/schemas/LogEntry"
+                $ref: "#/components/schemas/LogList"
         "404":
           $ref: "#/components/responses/Error"
         default:
@@ -359,6 +355,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Server"
+
+    LogList:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
 
     LogEntry:
       type: object

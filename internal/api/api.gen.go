@@ -265,6 +265,11 @@ type LogEntry struct {
 // LogEntrySource container はマイクラ（コンテナ）の出力、systemd は unit の起動・停止・再起動の記録
 type LogEntrySource string
 
+// LogList defines model for LogList.
+type LogList struct {
+	Entries []LogEntry `json:"entries"`
+}
+
 // Memory JVM のヒープ。コンテナのメモリ上限はここから自動で計算する
 //
 // Example: 2G
@@ -370,9 +375,7 @@ type DownServerParams struct {
 
 // GetServerLogsParams defines parameters for GetServerLogs.
 type GetServerLogsParams struct {
-	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
-
-	// Tail 末尾から何件返すか。省略時はすべて
+	// Tail 末尾から何件返すか
 	Tail *int `form:"tail,omitempty" json:"tail,omitempty"`
 }
 
@@ -495,8 +498,7 @@ type ClientInterface interface {
 
 	// GetServerLogs サーバーのログ（journal）を読む
 	//
-	// LogEntry を 1 行に 1 件ずつ流す（NDJSON）。停止中のサーバーでも過去のログを読める。
-	// follow=true のときは、クライアントが切断するまで新しいログを流し続ける。
+	// 停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。.
 	//
 	// Corresponds with GET /servers/{name}/logs (the `GetServerLogs` operationId).
 	GetServerLogs(ctx context.Context, name Name, params *GetServerLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -603,8 +605,7 @@ func (c *Client) DownServer(ctx context.Context, name Name, params *DownServerPa
 
 // GetServerLogs サーバーのログ（journal）を読む
 //
-// LogEntry を 1 行に 1 件ずつ流す（NDJSON）。停止中のサーバーでも過去のログを読める。
-// follow=true のときは、クライアントが切断するまで新しいログを流し続ける。
+// 停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。.
 //
 // Corresponds with GET /servers/{name}/logs (the `GetServerLogs` operationId).
 func (c *Client) GetServerLogs(ctx context.Context, name Name, params *GetServerLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -892,18 +893,6 @@ func NewGetServerLogsRequest(server string, name Name, params *GetServerLogsPara
 		// per the OpenAPI spec (e.g. "color=blue,black,brown").
 		var rawQueryFragments []string
 
-		if params.Follow != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "follow", *params.Follow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
 		if params.Tail != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "tail", *params.Tail, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
@@ -1079,8 +1068,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetServerLogsWithResponse サーバーのログ（journal）を読む
 	//
-	// LogEntry を 1 行に 1 件ずつ流す（NDJSON）。停止中のサーバーでも過去のログを読める。
-	// follow=true のときは、クライアントが切断するまで新しいログを流し続ける。
+	// 停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -1401,10 +1389,17 @@ func (r DownServerResponse) ContentType() string {
 type GetServerLogsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LogList
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *Error
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetServerLogsResponse) GetJSON200() *LogList {
+	return r.JSON200
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -1595,8 +1590,7 @@ func (c *ClientWithResponses) DownServerWithResponse(ctx context.Context, name N
 
 // GetServerLogsWithResponse サーバーのログ（journal）を読む
 //
-// LogEntry を 1 行に 1 件ずつ流す（NDJSON）。停止中のサーバーでも過去のログを読める。
-// follow=true のときは、クライアントが切断するまで新しいログを流し続ける。
+// 停止中のサーバーでも過去のログを読める。新しいログを流し続ける機能（follow）は持たない。.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -1867,6 +1861,13 @@ func ParseGetServerLogsResponse(rsp *http.Response) (*GetServerLogsResponse, err
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LogList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -2129,19 +2130,6 @@ func (siw *ServerInterfaceWrapper) GetServerLogs(w http.ResponseWriter, r *http.
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetServerLogsParams
-
-	// ------------- Optional query parameter "follow" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "follow", r.URL.Query(), &params.Follow, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "follow"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "follow", Err: err})
-		}
-		return
-	}
 
 	// ------------- Optional query parameter "tail" -------------
 
@@ -2681,47 +2669,18 @@ type GetServerLogsResponseObject interface {
 	VisitGetServerLogsResponse(w http.ResponseWriter) error
 }
 
-type GetServerLogs200ApplicationxNdjsonResponse struct {
-	Body          io.Reader
-	ContentLength int64
-}
+type GetServerLogs200JSONResponse LogList
 
-func (response GetServerLogs200ApplicationxNdjsonResponse) VisitGetServerLogsResponse(w http.ResponseWriter) error {
+func (response GetServerLogs200JSONResponse) VisitGetServerLogsResponse(w http.ResponseWriter) error {
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	if response.ContentLength != 0 {
-		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
-	}
-	w.WriteHeader(200)
-
-	if closer, ok := response.Body.(io.ReadCloser); ok {
-		defer closer.Close()
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		// If w doesn't support flushing, fall back to io.Copy.
-		_, err := io.Copy(w, response.Body)
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		return err
 	}
-	// text/event-stream messages are typically small; use a
-	// modest buffer and flush after each chunk so clients see
-	// events immediately instead of waiting on OS buffering.
-	buf := make([]byte, 4096)
-	for {
-		n, err := response.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-			flusher.Flush()
-		}
-		if err != nil {
-			if err == io.EOF {
-				return nil
-			}
-			return err
-		}
-	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type GetServerLogs404JSONResponse struct{ ErrorJSONResponse }
