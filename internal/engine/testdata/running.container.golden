@@ -1,0 +1,41 @@
+# このファイルは mcctld が生成する。編集しないこと。調整は mcctl-survival.container.d/*.conf で行う。
+[Unit]
+Description=mcctl server survival
+
+[Container]
+ContainerName=mcctl-survival
+Image=docker.io/itzg/minecraft-server:java21
+Pull=never
+Environment=EULA=TRUE
+Environment=VERSION=1.21.4
+Environment=TYPE=PAPER
+Environment=MEMORY=2G
+Environment=UID=0
+Environment=GID=0
+Environment=DIFFICULTY=hard
+Environment=MODRINTH_PROJECTS=fabric-api,lithium
+Environment="MOTD=§lWelcome 100%% \"fun\" $$HOME \\o/"
+Environment="OPS=it's_me"
+Label=mcctl.managed=true
+Label=mcctl.server=survival
+Volume=/var/lib/mcctl/servers/survival:/data:Z
+PublishPort=25565:25565/tcp
+HealthCmd=mc-health
+HealthInterval=30s
+HealthStartPeriod=120s
+HealthRetries=2
+Notify=healthy
+StopTimeout=60
+LogDriver=journald
+Memory=3072m
+
+[Service]
+Restart=on-failure
+RestartSec=5
+RestartSteps=5
+RestartMaxDelaySec=5min
+TimeoutStartSec=900
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target
