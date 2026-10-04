@@ -103,7 +103,7 @@ HealthRetries=2
 Notify=healthy
 StopTimeout=60
 LogDriver=journald
-PodmanArgs=--memory=<上限>
+Memory=<上限>
 
 [Service]
 Restart=on-failure
@@ -154,7 +154,8 @@ systemd の unit の状態を読み替える。あわせて health（互換 API 
 - unit が `failed` になった理由は journal で確認する（`mcctl logs`）。
 
 ### ログ
-- mcctld は `journalctl --user -u mcctl-<name>.service -o json -n N` を実行して読み、必要な項目だけ返す。sdjournal（cgo と libsystemd が必要）は使わない。
+- mcctld は `journalctl --user -o json -n N CONTAINER_NAME=mcctl-<name> + USER_UNIT=mcctl-<name>.service` を実行して読み、必要な項目だけ返す。sdjournal（cgo と libsystemd が必要）は使わない。
+  - `-u mcctl-<name>.service` で絞ると podman のイベントなど余計な行が混ざるので、「コンテナの出力」と「systemd がその unit について記録したもの」の2つに絞る（#5 で実機確認済み）。
 - mcctl はシステムユーザー（UID < 1000）なので、journald は専用の journal を作らず `system.journal` に入れる。そのため **mcctl を `systemd-journal` グループに入れる**（#2 で確認済み）。代わりに mcctl はシステム全体のログを読めるようになるが、mcctld は自分の unit のログだけを返す。
 - journal が揮発性（`/var/log/journal` がない）だと、ホストの再起動でログが消える。永続化を推奨する（AlmaLinux 10 の既定は揮発性だった）。
 
@@ -233,18 +234,20 @@ Last op:   up  2026-09-27 14:02  ok
 - 実際の podman と systemd を使うテストは `//go:build integration` を付け、Linux の VM で手動で実行する。
 
 ## 実装時に確認するリスク
-- **メモリ上限**: quadlet の専用キーがあればそれを使い、なければ `PodmanArgs=--memory` を使う。
 - **起動の初回**: サーバー本体のダウンロードとワールドの生成を含めて `TimeoutStartSec=900` に収まるか。Mod を多く入れたサーバーでは足りない可能性がある。
 
-## セットアップ（概要。詳細は #11）
-1. `useradd --system --create-home --home-dir /var/lib/mcctl mcctl` と、subuid / subgid の付与
-2. `usermod -aG systemd-journal mcctl`（ユーザー systemd が起動する前に行う。後から行う場合は `user@<uid>.service` を再起動する）
-3. `loginctl enable-linger mcctl`
-4. （推奨）`mkdir -p /var/log/journal` で journal を永続化する
-5. `systemctl --user -M mcctl@ enable --now podman.socket`
+## セットアップ
+`sudo scripts/setup.sh --add-operator <操作するユーザー>` で行う（#17。冪等で、`--dry-run` で計画だけ表示できる）。行う内容:
+1. システムユーザー `mcctl` の作成と、subuid / subgid の付与
+2. `systemd-journal` グループへの追加（ユーザー systemd が起動する前に行う）
+3. linger の有効化
+4. （推奨）journal の永続化
+5. `podman.socket`（ユーザーユニット）の有効化
 6. tmpfiles.d で `/run/mcctl` を作る
-7. `systemctl --user -M mcctl@ enable --now mcctld`
+7. mcctld のユーザーユニットの配置と有効化（#11）
 8. 操作するユーザーを `mcctl` グループに入れる
+
+ユーザー systemd の操作に `systemctl --user -M mcctl@` は使わない。AlmaLinux 10.2（systemd 257）では、呼ぶたびに logind のセッションが `closing` のまま残り、同じ UID でユーザーを作り直したときにユーザー systemd が起動しなくなる。`runuser` と `XDG_RUNTIME_DIR` / `DBUS_SESSION_BUS_ADDRESS` を使う（詳しくは `docs/troubleshooting.md`）。
 
 ## リポジトリ構成
 | パス | 役割 |
