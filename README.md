@@ -18,6 +18,8 @@ k8s を使うほどではないが、手でコンテナを管理するのは面�
 
 検証環境は AlmaLinux 10.2 / podman 5.8.2 / SELinux Enforcing。
 
+ホストの準備は `sudo scripts/setup.sh --add-operator <操作するユーザー>` で行える（`--help` でオプションを表示）。はまりどころは [docs/troubleshooting.md](docs/troubleshooting.md) を参照。
+
 ## 使い方（予定）
 ```sh
 mcctl create survival --port 25565 --version 1.21.4 --type PAPER --memory 4G --accept-eula
