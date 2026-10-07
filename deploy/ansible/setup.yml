@@ -1,0 +1,41 @@
+---
+# mcctl 固有のセットアップ。手順は scripts/setup.sh に一本化し、ここではそれを実行するだけにする。
+- name: mcctl のセットアップ（scripts/setup.sh）
+  hosts: mcctl_hosts
+  become: true
+  vars:
+    mcctl_unit_remote: /var/tmp/mcctl-ansible/mcctld.service
+  tasks:
+    - name: mcctld のユニットファイルを転送する
+      when: mcctl_mcctld_unit | length > 0
+      block:
+        - name: 転送先のディレクトリを作る
+          ansible.builtin.file:
+            path: "{{ mcctl_unit_remote | dirname }}"
+            state: directory
+            mode: "0700"
+
+        - name: ユニットファイルを転送する
+          ansible.builtin.copy:
+            src: "{{ mcctl_mcctld_unit }}"
+            dest: "{{ mcctl_unit_remote }}"
+            mode: "0644"
+
+    - name: setup.sh を実行する
+      vars:
+        mcctl_setup_args: >-
+          --user {{ mcctl_user | quote }}
+          {% for op in mcctl_operators %}--add-operator {{ op | quote }} {% endfor %}
+          {% if not (mcctl_persistent_journal | bool) %}--no-persistent-journal{% endif %}
+          {% if mcctl_mcctld_unit | length > 0 %}--mcctld-unit {{ mcctl_unit_remote | quote }}{% endif %}
+      ansible.builtin.script:
+        cmd: "{{ mcctl_repo_dir }}/scripts/setup.sh {{ mcctl_setup_args }}"
+        executable: /bin/bash
+      register: mcctl_setup
+      # setup.sh は変更したステップだけ [changed] を出す。
+      changed_when: "'[changed]' in mcctl_setup.stdout"
+
+    - name: setup.sh の結果を表示する
+      ansible.builtin.debug:
+        # [warn] は標準エラー出力に出る
+        msg: "{{ (mcctl_setup.stdout_lines + mcctl_setup.stderr_lines) | select('search', '\\[(changed|warn)\\]') | list or ['変更なし'] }}"

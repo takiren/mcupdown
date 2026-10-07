@@ -30,3 +30,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Ansible（deploy/ansible）の実際のインベントリとビルド成果物
+deploy/ansible/inventory.yml
+deploy/ansible/.build/

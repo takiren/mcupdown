@@ -1,0 +1,27 @@
+---
+# 検証を速くするため、サービス用ユーザーとしてイメージを事前に pull しておく。
+- name: イメージの事前 pull
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: サービス用ユーザーを調べる
+      ansible.builtin.import_tasks: tasks/user_facts.yml
+
+    - name: イメージがあるか調べる
+      ansible.builtin.command:
+        argv: "{{ mcctl_runas + ['podman', 'image', 'exists', item] }}"
+        chdir: "{{ mcctl_home }}"
+      loop: "{{ mcctl_images }}"
+      register: mcctl_image_exists
+      # 0: ある、1: ない
+      failed_when: mcctl_image_exists.rc not in [0, 1]
+      changed_when: false
+
+    - name: ないイメージを pull する
+      ansible.builtin.command:
+        argv: "{{ mcctl_runas + ['podman', 'pull', '--quiet', item.item] }}"
+        chdir: "{{ mcctl_home }}"
+      loop: "{{ mcctl_image_exists.results | selectattr('rc', 'equalto', 1) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: true

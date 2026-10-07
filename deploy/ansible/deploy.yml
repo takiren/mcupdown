@@ -1,0 +1,48 @@
+---
+# 手元で mcctl / mcctld をクロスビルドして配置する。
+- name: バイナリのビルドと配置
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: バイナリを配置しない設定なら終わる
+      ansible.builtin.meta: end_host
+      when: not (mcctl_deploy_binaries | bool)
+
+    - name: GOARCH を決める
+      ansible.builtin.import_tasks: tasks/goarch.yml
+
+    - name: 手元でビルドする
+      delegate_to: localhost
+      become: false
+      run_once: true
+      ansible.builtin.command:
+        cmd: >-
+          go build -trimpath
+          -o {{ mcctl_build_dir }}/linux-{{ item[1] }}/{{ item[0] }}
+          ./cmd/{{ item[0] }}
+        chdir: "{{ mcctl_repo_dir }}"
+      environment:
+        GOOS: linux
+        GOARCH: "{{ item[1] }}"
+        CGO_ENABLED: "0"
+      loop: >-
+        {{ ['mcctl', 'mcctld'] | product(ansible_play_hosts | map('extract', hostvars)
+        | selectattr('mcctl_goarch', 'defined') | map(attribute='mcctl_goarch') | unique) | list }}
+      loop_control:
+        label: "{{ item[0] }} (linux/{{ item[1] }})"
+      # 毎回ビルドし直す。配置するかどうかは次の copy が中身で判断する。
+      changed_when: false
+
+    - name: バイナリを配置する
+      ansible.builtin.copy:
+        src: "{{ mcctl_build_dir }}/linux-{{ mcctl_goarch }}/{{ item }}"
+        dest: "{{ mcctl_bin_dir }}/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [mcctl, mcctld]
+      notify: Restart mcctld
+
+  handlers:
+    - name: Restart mcctld
+      ansible.builtin.include_tasks: tasks/restart_mcctld.yml

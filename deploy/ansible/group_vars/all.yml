@@ -1,0 +1,47 @@
+---
+# リポジトリのルート（手元）。setup.sh の転送、バイナリとテストのビルドに使う。
+mcctl_repo_dir: "{{ playbook_dir }}/../.."
+
+# サービス用のユーザー。scripts/setup.sh の --user に渡す。
+mcctl_user: mcctl
+# mcctl グループに入れて、mcctl で操作できるようにするユーザー。
+mcctl_operators: []
+# journal を永続化する（false で setup.sh に --no-persistent-journal を渡す）。
+mcctl_persistent_journal: true
+# AlmaLinux 10 以外でも止めずに続ける。
+mcctl_allow_unsupported_os: false
+
+# ---- バイナリの配置（deploy.yml） ----
+mcctl_deploy_binaries: true
+mcctl_bin_dir: /usr/local/bin
+# 手元でビルドした成果物の置き場所。
+mcctl_build_dir: "{{ playbook_dir }}/.build"
+# mcctld のユーザーユニットのファイル（手元のパス、#11）。空なら配置しない。
+mcctl_mcctld_unit: ""
+
+# ---- イメージの事前 pull（images.yml） ----
+mcctl_images:
+  - docker.io/itzg/minecraft-server:latest
+
+# ---- 統合テスト（integration.yml） ----
+# テストを含むリポジトリ（別のブランチを試すときは、その worktree を指す）。
+mcctl_it_repo_dir: "{{ mcctl_repo_dir }}"
+# `go test -c -tags integration` するパッケージ（リポジトリのルートからの相対パス）。
+mcctl_it_packages:
+  - ./internal/engine
+# -test.run に渡す正規表現。空ならすべて。
+mcctl_it_run: ""
+mcctl_it_timeout: 30m
+# テストバイナリを置く、対象マシン上のディレクトリ。
+mcctl_it_remote_dir: /var/tmp/mcctl-it
+
+# ---- 片付け（cleanup.yml） ----
+# 名前がこれで始まるサーバーを検証用とみなして片付ける。統合テストは e2e- を使う。
+mcctl_cleanup_prefix: e2e-
+# 検証用サーバーのデータディレクトリ（~/servers/<prefix>*）も消す。
+mcctl_cleanup_data: true
+# scripts/uninstall.sh で完全に元に戻す。mcctl_uninstall_confirm にユーザー名を書いたときだけ動く。
+mcctl_uninstall: false
+mcctl_uninstall_confirm: ""
+# ホームディレクトリ（ワールドのデータ、コンテナのイメージ）も消す。
+mcctl_uninstall_purge: false

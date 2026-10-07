@@ -76,3 +76,14 @@ jobs:
           shellcheck --version
       - name: shellcheck
         run: shellcheck scripts/*.sh
+
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_LINT_VERSION: 26.9.0
+    steps:
+      - uses: actions/checkout@v7
+      # 構文チェック（syntax-check）も ansible-lint の中で行われる
+      - name: ansible-lint
+        run: pipx run --spec "ansible-lint==${ANSIBLE_LINT_VERSION}" ansible-lint -c deploy/ansible/.ansible-lint deploy/ansible
