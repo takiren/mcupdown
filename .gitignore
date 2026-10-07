@@ -34,3 +34,6 @@ go.work.sum
 # Claude Code のサブエージェントが作る worktree と個人設定
 .claude/worktrees/
 .claude/settings.local.json
+# Ansible（deploy/ansible）の実際のインベントリとビルド成果物
+deploy/ansible/inventory.yml
+deploy/ansible/.build/

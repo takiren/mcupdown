@@ -1,0 +1,133 @@
+---
+# 検証用のサーバーを片付ける。既定では名前が mcctl_cleanup_prefix（e2e-）で始まるものだけを対象にする。
+# mcctl_uninstall=true と mcctl_uninstall_confirm=<ユーザー名> を付けると、scripts/uninstall.sh で完全に元に戻す。
+- name: 検証用サーバーの片付け
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: 対象の接頭辞を確認する
+      ansible.builtin.assert:
+        # 空だと検証用以外のサーバーまで消してしまう
+        that: mcctl_cleanup_prefix | length > 0
+        fail_msg: mcctl_cleanup_prefix を空にはできない
+        quiet: true
+
+    - name: サービス用ユーザーがいるか調べる
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ mcctl_user }}"
+      register: mcctl_cleanup_passwd
+      failed_when: false
+
+    - name: 検証用サーバーを片付ける
+      when: mcctl_user in (mcctl_cleanup_passwd.ansible_facts.getent_passwd | default({}))
+      block:
+        - name: サービス用ユーザーを調べる
+          ansible.builtin.include_tasks: tasks/user_facts.yml
+
+        - name: 検証用のユニットファイルを探す
+          ansible.builtin.find:
+            paths:
+              - "{{ mcctl_home }}/.config/containers/systemd"
+              - "{{ mcctl_home }}/.config/systemd/user"
+            patterns:
+              - "mcctl-{{ mcctl_cleanup_prefix }}*.container"
+              - "mcctl-{{ mcctl_cleanup_prefix }}*.service"
+          register: mcctl_cleanup_units
+
+        - name: 検証用の unit を止める
+          ansible.builtin.command:
+            argv: "{{ mcctl_runas + ['systemctl', '--user', 'stop', (item.path | basename | splitext | first) ~ '.service'] }}"
+          loop: "{{ mcctl_cleanup_units.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+          changed_when: true
+
+        - name: 検証用のユニットファイルと drop-in を消す
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: >-
+            {{ mcctl_cleanup_units.files | map(attribute='path') | list
+            + (mcctl_cleanup_units.files | map(attribute='path') | select('match', '.*\.container$') | map('regex_replace', '$', '.d') | list) }}
+
+        - name: systemd に読み込み直させる
+          ansible.builtin.command:
+            argv: "{{ mcctl_runas + ['systemctl', '--user', 'daemon-reload'] }}"
+          when: mcctl_cleanup_units.matched > 0
+          changed_when: true
+
+        - name: 残っている検証用のコンテナを探す
+          ansible.builtin.command:
+            argv: "{{ mcctl_runas + ['podman', 'ps', '--all', '--quiet', '--filter', 'name=^mcctl-' ~ mcctl_cleanup_prefix] }}"
+            chdir: "{{ mcctl_home }}"
+          register: mcctl_cleanup_containers
+          changed_when: false
+
+        - name: 残っている検証用のコンテナを消す
+          ansible.builtin.command:
+            argv: "{{ mcctl_runas + ['podman', 'rm', '--force', '--time', '10', item] }}"
+            chdir: "{{ mcctl_home }}"
+          loop: "{{ mcctl_cleanup_containers.stdout_lines }}"
+          changed_when: true
+
+        - name: 検証用のデータディレクトリを探す
+          ansible.builtin.find:
+            paths: "{{ mcctl_home }}/servers"
+            patterns: "{{ mcctl_cleanup_prefix }}*"
+            file_type: directory
+          register: mcctl_cleanup_data_dirs
+          when: mcctl_cleanup_data | bool
+
+        - name: 検証用のデータディレクトリを消す
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ mcctl_cleanup_data_dirs.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: mcctl_cleanup_data | bool
+
+- name: 完全に元に戻す（scripts/uninstall.sh）
+  hosts: mcctl_hosts
+  become: true
+  tasks:
+    - name: 明示的に指定されていなければ終わる
+      ansible.builtin.meta: end_host
+      when: not (mcctl_uninstall | bool)
+
+    - name: サービス用ユーザーがいるか調べる
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ mcctl_user }}"
+      register: mcctl_uninstall_passwd
+      failed_when: false
+
+    - name: ユーザーがいなければ終わる
+      # uninstall.sh はユーザーがいないとエラーで終わる。2回目の実行を changed=0 で終えるため
+      ansible.builtin.meta: end_host
+      when: mcctl_user not in (mcctl_uninstall_passwd.ansible_facts.getent_passwd | default({}))
+
+    - name: 確認のためのユーザー名が一致するか確かめる
+      ansible.builtin.assert:
+        that: mcctl_uninstall_confirm == mcctl_user
+        fail_msg: >-
+          ユーザー {{ mcctl_user }} を消すには -e mcctl_uninstall_confirm={{ mcctl_user }} を付ける
+          {{ '（mcctl_uninstall_purge=true なので、ワールドのデータも消える）' if mcctl_uninstall_purge | bool else '' }}
+        quiet: true
+
+    - name: uninstall.sh を実行する
+      ansible.builtin.script:
+        cmd: >-
+          {{ mcctl_repo_dir }}/scripts/uninstall.sh --user {{ mcctl_user | quote }} --yes
+          {% if mcctl_uninstall_purge | bool %}--purge{% endif %}
+        executable: /bin/bash
+      register: mcctl_uninstall_result
+      changed_when: "'[changed]' in mcctl_uninstall_result.stdout"
+
+    - name: uninstall.sh の結果を表示する
+      ansible.builtin.debug:
+        # [warn] は標準エラー出力に出る
+        msg: >-
+          {{ (mcctl_uninstall_result.stdout_lines + mcctl_uninstall_result.stderr_lines)
+          | select('search', '\[(changed|warn)\]') | list or ['変更なし'] }}
