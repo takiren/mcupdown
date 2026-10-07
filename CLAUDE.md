@@ -41,7 +41,8 @@ mcctl ──HTTP over Unix socket (/run/mcctl/mcctld.sock)──▶ mcctld
 - up / down は非同期（202）。サーバーごとのロックを持ち、操作中の変更系は 409。最後の操作の結果はデーモンのメモリにだけ持つ。
 - mcctld は mcctl ユーザーの systemd --user サービスとして動く。mcctl ユーザーは linger と `systemd-journal` グループが必須。
 
-依存の向き: `cmd/mcctld` → `internal/api`（ハンドラ）→ `internal/daemon` → `internal/store`, `internal/engine`。
+依存の向き: `cmd/mcctld` → `internal/apiserver`（ハンドラと認可）→ `internal/api`, `internal/daemon` → `internal/store`, `internal/engine`。
+ハンドラを `internal/api` に置かないのは、CLI も `internal/api` を使うので、daemon や go-systemd が mcctl のバイナリに入ってしまうため。
 `cmd/mcctl` は `internal/api` の生成クライアント（`api.NewUnixSocketClient`）を使うだけで、ロジックを持たない。
 
 ### API（`api/openapi.yaml` → `internal/api`）

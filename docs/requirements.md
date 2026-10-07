@@ -255,9 +255,10 @@ Last op:   up  2026-09-27 14:02  ok
 | `cmd/mcctl` | CLI（cobra）。生成したクライアントで API を叩くだけ |
 | `cmd/mcctld` | デーモンのエントリポイント。フラグの解釈と各パッケージの組み立て |
 | `api/openapi.yaml` | API 仕様（正） |
-| `internal/api` | oapi-codegen の生成コード（サーバー I/F とクライアント） |
+| `internal/api` | oapi-codegen の生成コード（サーバー I/F とクライアント）。CLI も使うので daemon には依存しない |
+| `internal/apiserver` | API のハンドラ（daemon の呼び出しとエラーの読み替え）と、接続元の UID による認可 |
 | `internal/daemon` | 中核のロジック（操作、ロック、最後の操作、起動時同期） |
 | `internal/store` | Store（JSON ファイルの実装） |
 | `internal/engine` | quadlet ファイルの生成、systemd（D-Bus）、podman の互換 API、journal。インターフェースとフェイク |
 
-依存の向き: `cmd/mcctld` → `internal/api`（ハンドラ）→ `internal/daemon` → `internal/store`, `internal/engine`
+依存の向き: `cmd/mcctld` → `internal/apiserver`（ハンドラ）→ `internal/api`, `internal/daemon` → `internal/store`, `internal/engine`
