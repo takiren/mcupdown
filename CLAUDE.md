@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 概要
 1台のホストで少数のマイクラサーバー（Java 版）をコンテナで管理するツール。常駐デーモン `mcctld` と、その API を叩くだけの CLI `mcctl` からなる。リポジトリ名は `mcupdown`（ifupdown 由来）。
 
-**要件と設計の正は `docs/requirements.md`**。README は初期の構想（docker 対応、rootful 対応など）のままで、現在の設計とは異なる。設計判断の根拠（実機での検証結果）は GitHub Issue #2 のコメントにある。
+**要件と設計の正は `docs/requirements.md`**。README は利用者向けの概要だけを書く。設計判断の根拠（実機での検証結果）は GitHub Issue #2 のコメントにある。
 
 ドキュメント、コードのコメント、Issue、PR は日本語で書く。
 
@@ -30,7 +30,7 @@ mcctl ──HTTP over Unix socket (/run/mcctl/mcctld.sock)──▶ mcctld
   mcctld ├─ 書き込み ─▶ ~mcctl/.config/containers/systemd/mcctl-<name>.container（quadlet）
          ├─ D-Bus ───▶ systemd --user（start / stop / daemon-reload / unit の状態）
          ├─ 互換 API ─▶ podman.sock（pull / inspect / exec）
-         ├─ journalctl --user -o json（ログ）
+         ├─ journalctl --user -o json（ログ。CONTAINER_NAME と USER_UNIT で絞る）
          └─ Store（/var/lib/mcctl/state.json）
 ```
 
@@ -59,8 +59,8 @@ mcctl ──HTTP over Unix socket (/run/mcctl/mcctld.sock)──▶ mcctld
 
 ## 開発環境
 - macOS ではユニットテストと CLI の開発だけを行う。外部とのやり取り（quadlet ファイル、systemd、podman、journal）はインターフェースに切り出し、フェイクでテストする。
-- 実際の podman と systemd を使う確認は Linux のマシンで行う。検証用マシンは Ansible で構築できるようにする予定（#20）。
-- mcctl ユーザーとして podman や systemctl --user を操作するときは、`XDG_RUNTIME_DIR` と `DBUS_SESSION_BUS_ADDRESS` が必要（`systemctl --user -M mcctl@` も使える）。
+- 実際の podman と systemd を使う確認は Linux のマシンで行う。ホストの準備は `scripts/setup.sh`、検証用マシンの構築と統合テストの実行は Ansible（#20、`deploy/ansible/`）で行う。はまりどころは `docs/troubleshooting.md`。
+- mcctl ユーザーとして podman や systemctl --user を操作するときは、`runuser -u mcctl -- env XDG_RUNTIME_DIR=/run/user/<uid> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus ...` を使う。`systemctl --user -M mcctl@` は使わない（logind のセッションが残り続ける問題がある）。
 
 ## 進め方
 - main は保護されている。作業はブランチを切って PR を出す。PR には対応する Issue を `Closes #N` で書く。
