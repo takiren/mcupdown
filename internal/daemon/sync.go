@@ -13,6 +13,16 @@ import (
 // ErrNotRootless は podman が rootless で動いていないことを表す。mcctld は rootless podman 専用。
 var ErrNotRootless = errors.New("podman is not running rootless")
 
+// PartialSyncError は、同期が最後まで進んだうえで一部のサーバーの処理に失敗したことを表す。
+// デーモンは警告を出して起動を続けてよい。それ以外のエラーは、起動をやめるべきもの。
+type PartialSyncError struct {
+	Errs []error
+}
+
+func (e *PartialSyncError) Error() string { return errors.Join(e.Errs...).Error() }
+
+func (e *PartialSyncError) Unwrap() []error { return e.Errs }
+
 // Sync はデーモンの起動時に、Store と systemd の状態を揃える。リクエストを受け付ける前に呼ぶ。
 //
 // ホストの再起動後の自動起動とクラッシュからの復旧は systemd が担うので、ここでは最小限のことだけを行う。
@@ -22,7 +32,7 @@ var ErrNotRootless = errors.New("podman is not running rootless")
 //     failed はそのままにして status で見せる
 //   - mcctld が生成したのに Store にない .container は、警告を出すだけで触らない
 //
-// 個々のサーバーの失敗では止まらず、最後にまとめて返す。
+// 個々のサーバーの失敗では止まらず、最後に *PartialSyncError でまとめて返す。
 func (d *Daemon) Sync(ctx context.Context) error {
 	rootless, err := d.eng.Podman.Rootless(ctx)
 	if err != nil {
@@ -64,7 +74,10 @@ func (d *Daemon) Sync(ctx context.Context) error {
 	}
 
 	d.warnOrphans(servers)
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		return &PartialSyncError{Errs: errs}
+	}
+	return nil
 }
 
 func (d *Daemon) startIfStopped(ctx context.Context, name string) error {

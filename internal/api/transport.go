@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 )
@@ -10,10 +11,29 @@ import (
 const BasePath = "/v1"
 
 // NewHandler は StrictServerInterface の実装を BasePath の下にマウントした http.Handler を返す。
+// リクエストの解釈に失敗したとき（JSON やクエリパラメータが不正など）も、
+// 他のエラーと同じ {"error": {"code", "message"}} の形で返す。
 func NewHandler(si StrictServerInterface) http.Handler {
-	return HandlerWithOptions(NewStrictHandler(si, nil), StdHTTPServerOptions{
-		BaseURL: BasePath,
+	badRequest := func(w http.ResponseWriter, _ *http.Request, err error) {
+		WriteError(w, http.StatusBadRequest, ErrorCodeInvalidArgument, err.Error())
+	}
+	strict := NewStrictHandlerWithOptions(si, nil, StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: badRequest,
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, _ error) {
+			WriteError(w, http.StatusInternalServerError, ErrorCodeInternal, "internal error")
+		},
 	})
+	return HandlerWithOptions(strict, StdHTTPServerOptions{
+		BaseURL:          BasePath,
+		ErrorHandlerFunc: badRequest,
+	})
+}
+
+// WriteError はエラーを {"error": {"code", "message"}} の形で書き出す。
+func WriteError(w http.ResponseWriter, status int, code ErrorCode, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(Error{Error: ErrorBody{Code: code, Message: message}})
 }
 
 // NewUnixSocketClient は Unix ソケット上の mcctld に接続するクライアントを返す。

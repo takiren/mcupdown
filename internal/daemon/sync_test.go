@@ -109,11 +109,23 @@ func TestSyncContinuesAfterFailure(t *testing.T) {
 	e.fake.SetError("Start", errors.New("boom"))
 
 	err := e.d.Sync(ctx)
-	if err == nil {
-		t.Fatal("expected error")
+	var partial *PartialSyncError
+	if !errors.As(err, &partial) || len(partial.Errs) != 2 {
+		t.Fatalf("err = %v, want PartialSyncError with 2 errors", err)
 	}
 	calls := e.fake.Calls()
 	if !slices.Contains(calls, "Start mcctl-a.service") || !slices.Contains(calls, "Start mcctl-b.service") {
 		t.Errorf("both servers should be attempted: %q", calls)
+	}
+}
+
+func TestSyncReloadFailureIsFatal(t *testing.T) {
+	e := newEnv(t)
+	e.create(t, "survival", 25565)
+	e.fake.SetError("Reload", errors.New("dbus down"))
+	err := e.d.Sync(t.Context())
+	var partial *PartialSyncError
+	if err == nil || errors.As(err, &partial) {
+		t.Fatalf("err = %v, want a fatal (non-partial) error", err)
 	}
 }
